@@ -1,0 +1,170 @@
+---
+title: "project5_in_R"
+author: "Isaac Moore"
+date: "9/4/2017"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r setting up environment}
+setwd("~/Google Drive/data_science/general_assembly/Projects/DSI_SM_Project5/r")
+library(tidyverse)
+library(RPostgreSQL)
+library(stringr)
+```
+
+```{r adding table to titanic database}
+# had to add a new table of the test dataframe, since someone had deleted it table form the database.
+
+# test_clean <- read_csv("../data/test.csv")
+# dbWriteTable(con, "titanic_test",
+#             value = test_clean, append = FALSE, row.names = FALSE)
+```
+
+# Part 1: Aquire the Data
+### 1. Connect to the remote database
+```{r reading in data, include=TRUE}
+pw <- {
+  "gastudents"
+}
+ 
+# loads the PostgreSQL driver
+drv <- dbDriver("PostgreSQL")
+# creates a connection to the postgres database
+# note that "con" will be used later in each connection to the database
+con <- dbConnect(drv, dbname = "titanic",
+                 host = "dsi.c20gkj5cvu3l.us-east-1.rds.amazonaws.com", port = 5432,
+                 user = "dsi_student", password = pw)
+rm(pw) # removes the password
+```
+
+### 2. Query the database and aggregate the data
+```{r get data from database, include=TRUE}
+train <- dbGetQuery(con, "SELECT * from titanic_train")
+test <- dbGetQuery(con, "SELECT * from titanic_test")
+```
+
+# Part 2: Exploratory Data Analysis
+### 1. Describe the Data
+```{r create a copy of the "train" dataframe to "df"}
+df <- train
+```
+
+```{r checking for null values}
+colSums(is.na(df))
+```
+
+```{r Sumary Statistics for each column}
+summary(df)
+```
+Exploring survival statistics
+```{r explore data types in each column}
+glimpse(df)
+```
+
+```{r how many survived?}
+df$Survived <- as.factor(df$Survived)
+levels(df$Survived) <- c("Victims", "Survived")
+table(df$Survived)
+```
+
+```{r how many survived per each Sex}
+df %>% group_by(Sex, Survived) %>% summarise(n = n())
+```
+
+```{r visualize how many survived per each Sex}
+df %>% group_by(Sex, Survived) %>% 
+        summarise(n = n()) %>%
+        ggplot(aes(x = Sex, y = n)) + 
+                geom_bar(stat = "identity") + 
+                facet_grid(.~Survived) + 
+                labs(title = "Survival counts per gender", x = "Sex", y = "Count")
+```
+More females survived, than perished, in our training dataset. 
+
+
+```{r histogram of age per survival}
+df %>% ggplot(aes(x = Age)) + 
+                geom_histogram(binwidth = 5) + 
+                facet_grid(.~Survived) + 
+                geom_vline(xintercept = mean(df$Age, na.rm = T),colour = "red", show.legend = TRUE) + 
+                labs(title = "Histogram of Age per survival", y = "Count", x = "Age")
+```
+If you are younger you were more likely to survive.
+
+```{r Average ticket price paid per gender in each class}
+df %>% group_by(Sex, Pclass) %>% 
+        summarise(price = mean(Fare)) %>%
+        ggplot(aes(y = price, x = Pclass, col = factor(Sex))) +
+                geom_bar(stat = "identity", position = "dodge") + 
+                labs(title = "Average prices paid per class for Male/Female", x = "Passenger Class", y = "Average Ticket Price", color = "Sex")
+```
+Females on average paid more than males, especially in first class.
+
+```{r extract title and add to a new column}
+df$title <- str_extract(df$Name, regex("[A-Z]\\w+\\."))
+df$title[is.na(df$title)] <- "Other"
+table(df$title)
+```
+
+```{r average age of survival per title}
+ggplot(df, aes(x = title, y = mean(Age, na.rm = T), col = Survived)) + 
+        geom_bar(stat = "identity", position = "stack") + 
+        labs(title = "Average age of survival per title", y = "Average Age", x = "Title") + 
+        coord_flip()
+```
+Unmarried women (Miss.) had a better survival rate (per average age) vs married women (Mrs.)
+
+# Part 3: Data Wrangling
+### 1. Create Dummy Variables for Sex
+**I will convert the Sex column to a factor, which will work better in R ** 
+```{r convert sex and passesnger class columns to a factor}
+df$Sex <- as.factor(df$Sex)
+df$Pclass <- as.factor(df$Pclass)
+df$Embarked <- as.factor(df$Embarked)
+```
+
+Fill NA values...
+```{r fill NA values}
+df$Age[is.na(df$Age)] <- mean(df$Age, na.rm = T)# Filling with the mean Age
+df$Cabin[is.na(df$Cabin)] <- "???" # too many to drop the columns, filling with '???'
+df <- na.omit(df)
+colSums(is.na(df))
+```
+
+
+
+# Part 4: Logistic Regression and Model Validation
+### 1. Define the variables that we will use in our classification analysis  
+**We will be using the *Pclass + Sex + Age + Parch + Fare + Embarked* columns from the dataframe to predict who survived on the Titanic**  
+
+### 2. Transform "Y" into a 1-Dimensional Array for SciKit-Learn  
+**No need to perform for logistic regression in R, you are able to specify our dependent and independent variables in the call to formulate the model.**  
+
+### 3. Conduct the logistic regression  
+```{r creating the model}
+model <- glm(Survived ~ Pclass + Sex + Age + Parch + Fare + Embarked, family=binomial(link='logit'), data=df)
+```
+### 4. Examine the coefficients to see our correlations
+```{r examine the coefficients}
+summary(model)
+```
+### 6. Test the Model by introducing a Test or Validaton set
+```{r convert the test columns to factors}
+test$Sex <- as.factor(test$Sex)
+test$Pclass <- as.factor(test$Pclass)
+test$Embarked <- as.factor(test$Embarked)
+```
+
+
+```{r predict survival on the test set}
+test_sub <- test %>% select(Pclass, Sex, Age, Parch, Fare, Embarked)
+preds <- predict(model,test_sub,type='response')
+preds[1:10]
+```
+
+
+
