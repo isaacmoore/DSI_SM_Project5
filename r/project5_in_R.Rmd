@@ -9,11 +9,13 @@ output: pdf_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-```{r setting up environment}
+```{r setting up environment, echo = FALSE}
 setwd("~/Google Drive/data_science/general_assembly/Projects/DSI_SM_Project5/r")
 library(tidyverse)
 library(RPostgreSQL)
 library(stringr)
+library(caret)
+library(caTools)
 ```
 
 ```{r adding table to titanic database}
@@ -136,7 +138,6 @@ colSums(is.na(df))
 ```
 
 
-
 # Part 4: Logistic Regression and Model Validation
 ### 1. Define the variables that we will use in our classification analysis  
 **We will be using the *Pclass + Sex + Age + Parch + Fare + Embarked* columns from the dataframe to predict who survived on the Titanic**  
@@ -144,27 +145,105 @@ colSums(is.na(df))
 ### 2. Transform "Y" into a 1-Dimensional Array for SciKit-Learn  
 **No need to perform for logistic regression in R, you are able to specify our dependent and independent variables in the call to formulate the model.**  
 
+```{r train/test split}
+rows <- sample(nrow(df))
+
+# Randomly order data: Sonar
+df <- df[rows, ]
+
+# Identify row to split on: split (75/25)
+split <- round(nrow(df) * .75)
+
+# Create train
+df_train <- df[1:split, ]
+
+# Create test
+df_test <- df[(split + 1):nrow(df),]
+```
+
+
 ### 3. Conduct the logistic regression  
 ```{r creating the model}
-model <- glm(Survived ~ Pclass + Sex + Age + Parch + Fare + Embarked, family=binomial(link='logit'), data=df)
+model <- glm(Survived ~ Pclass + Sex + Age + Parch + Fare + Embarked, family=binomial(link='logit'), data=df_train)
 ```
 ### 4. Examine the coefficients to see our correlations
 ```{r examine the coefficients}
-summary(model)
+coef(summary(model))
 ```
-### 6. Test the Model by introducing a Test or Validaton set
+### 6. Test the Model by introducing a Test or Validaton set  
+The "Sex", "Pclass", and "Emabarked" columns need to be converted to a factor - same as the training set for the model to work on the test set.
 ```{r convert the test columns to factors}
-test$Sex <- as.factor(test$Sex)
-test$Pclass <- as.factor(test$Pclass)
-test$Embarked <- as.factor(test$Embarked)
+# test$Sex <- as.factor(test$Sex)
+# test$Pclass <- as.factor(test$Pclass)
+# test$Embarked <- as.factor(test$Embarked)
 ```
 
-
+### 7. Predict the class labels for the Test set   
+### and  
+### 8. Predict the class probabilities for the Test set  
 ```{r predict survival on the test set}
-test_sub <- test %>% select(Pclass, Sex, Age, Parch, Fare, Embarked)
-preds <- predict(model,test_sub,type='response')
-preds[1:10]
+preds <- predict(model, df_test, type = "response")
+preds_class <- ifelse(preds > .50, "Survived", "Victims")
+print(table(preds_class))
+print(summary(preds))
 ```
 
+### 9. Evaluate the Test set  
+### and  
+### 13. Check the Confusion Matrix
+```{r predict the pobailities}
+confusionMatrix(preds_class, df_test$Survived)
+```
 
+### 10. Cross validate the test set
+```{r}
+model_cv <- train(Survived ~ Pclass + Sex + Age + Parch + Fare + Embarked,
+                data = df_train,
+                method = "glm",
+                family = binomial,
+                trControl = trainControl(method="cv", 
+                                         number=10, 
+                                         verboseIter = TRUE,
+                                         classProbs = TRUE))
+preds_cv <- predict(model_cv, df_test, type = "prob")
+# head(preds_cv)
+preds_cv <- preds_cv %>% mutate(actual = ifelse(Survived > Victims, "Survived", "Victims"))
+# preds_class_cv <- ifelse(preds_cv > .50, "Survived", "Victims")
+confusionMatrix(preds_cv$actual , df_test$Survived)
+```
+
+### 11. Check the Classification Report
+```{r}
+confusionMatrix(preds_class, df_test$Survived)$byClass
+```
+
+### 12. What do the classification metrics tell us?
+* Precision: When it predicts yes, how often is it correct?
+* Recall: When it's actually yes, how often does it predict yes?
+* F1-Score: Is a weighted averge of the accuracy (precision and recall)
+*-Data School*
+
+### 14. What does the Confusion Matrix tell us?
+* True Positive: 154
+* False Negative (Type 2 Error): 29
+* False Positive (Type 1 Error): 27
+* True Negative: 77
+The true positive tells us how many times the model correctly predicted who survived, 1, True * negative is how many time the model correctly predicted who did not survive, 0. False negative is how many times the model predicted that someone didnt not survive, but actually did and the false positive is when the model predicted that someone surived, they did not.
+
+15. Plot the ROC curve
+```{r}
+colAUC(preds, df_test$Survived, plotROC = TRUE)
+
+```
+
+### 16. What does the ROC curve tell us?
+The ROC curve is the True Positive Rate (TPR) over the False Postive Rate (FPR), this will show us the rate at which our model is accurately predicting outcomes, based off of our training data. The dashed line represents 50%, anything above the line means that the model is betthen than a flip of a coin. As the lengend shows, the ROC curve area is .80, this mean that the model is 80% accurate at predicting actually true results.
+
+# Part 5: Gridsearch
+1. Use GridSearchCV with logistic regression to search for optimal parameters
+* Use the provided parameter grid. Feel free to add if you like (such as n_jobs).
+* Use 5-fold cross-validation.
+```{r}
+
+```
 
